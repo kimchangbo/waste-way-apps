@@ -15,7 +15,7 @@ def set_korean_font():
     plt.rcParams['axes.unicode_minus'] = False 
 
 # ==========================================
-# 1. 데이터 로드 및 보간 함수
+# 1. 데이터 로드 및 보간 함수 (준설선 데이터만 유지)
 # ==========================================
 @st.cache_data
 def load_dredging_data(file_path):
@@ -31,166 +31,6 @@ def load_dredging_data(file_path):
     except Exception as e:
         st.error(f"⚠️ 준설선 데이터 파일 로드 실패: {e}")
         return None, None, None, None
-
-# --- ✨ 핵심 수정: 복잡한 엑셀(환경부 일람표) 제목행 자동 탐색 및 병합 ---
-@st.cache_data
-def load_rainfall_data():
-    def standardize_df(df):
-        # 엑셀 내 다양한 컬럼명을 코드 표준으로 강제 매핑
-        col_map = {
-            '관측소코드': 'Site Number', '지점코드': 'Site Number', '코드': 'Site Number', '지점번호': 'Site Number', '지점': 'Site Number',
-            '관측소명(변경후)': 'Station Name', '관측소명': 'Station Name', '지점명': 'Station Name', '관측소': 'Station Name',
-            '재현기간': 'Return Period', '빈도': 'Return Period', '재현빈도': 'Return Period'
-        }
-        new_cols = []
-        for c in df.columns:
-            c_str = str(c).replace(' ', '').replace('\n', '')
-            mapped = str(c)
-            for k, v in col_map.items():
-                if k in c_str:
-                    mapped = v
-                    break
-            new_cols.append(mapped)
-            
-        # 중복 컬럼명 방지 처리
-        final_cols = []
-        for col in new_cols:
-            if col in final_cols and col in ['Site Number', 'Station Name', 'Return Period']:
-                final_cols.append(col + "_dup")
-            else:
-                final_cols.append(col)
-        df.columns = final_cols
-        
-        # Site Number(지점)가 소수점(10014010.0)으로 읽히는 현상 방지
-        if 'Site Number' in df.columns:
-            df['Site Number'] = pd.to_numeric(df['Site Number'], errors='ignore')
-            df['Site Number'] = df['Site Number'].apply(lambda x: str(int(x)) if isinstance(x, float) and x.is_integer() else str(x)).str.strip()
-            
-        if 'Station Name' in df.columns:
-            df['Station Name'] = df['Station Name'].astype(str).str.strip()
-            df['Station Name'] = df['Station Name'].replace(['nan', 'NaN', 'None', ''], np.nan)
-            
-        if 'Return Period' in df.columns:
-            df['Return Period'] = pd.to_numeric(df['Return Period'], errors='coerce').fillna(0).astype(int)
-            
-        return df
-
-    search_dirs = [os.getcwd(), os.path.dirname(os.path.abspath(__file__))]
-    
-    # ---------------------------------------------------------
-    # 1. 폴더 내 모든 파일에서 "관측소 마스터(코드+이름)" 사전 만들기
-    # ---------------------------------------------------------
-    station_dict = {}
-    
-    for d in search_dirs:
-        if not os.path.exists(d): continue
-        for f in os.listdir(d):
-            f_lower = f.lower()
-            if f.startswith('~$'): continue
-            full_path = os.path.join(d, f)
-            
-            try:
-                if f_lower.endswith('.xlsx') or f_lower.endswith('.xls'):
-                    # 환경부 엑셀처럼 위에 빈칸이나 큰 제목이 있는 경우를 대비해 header=None으로 읽음
-                    xls_raw = pd.read_excel(full_path, sheet_name=None, header=None, engine='calamine')
-                    for s_name, sheet_df in xls_raw.items():
-                        if sheet_df.empty: continue
-                        
-                        # 실제 제목행(관측소코드 글자가 있는 행) 찾기 (위에서부터 20줄까지만 탐색)
-                        header_idx = -1
-                        for i in range(min(20, len(sheet_df))):
-                            row_vals = [str(x).replace(' ', '').replace('\n', '') for x in sheet_df.iloc[i].values if pd.notna(x)]
-                            row_str = "".join(row_vals)
-                            if '관측소코드' in row_str or '지점코드' in row_str or '지점번호' in row_str:
-                                header_idx = i
-                                break
-                        
-                        if header_idx != -1:
-                            df_fixed = sheet_df.iloc[header_idx+1:].copy()
-                            df_fixed.columns = sheet_df.iloc[header_idx].values
-                            df_std = standardize_df(df_fixed)
-                            
-                            if 'Site Number' in df_std.columns and 'Station Name' in df_std.columns:
-                                valid_rows = df_std.dropna(subset=['Site Number', 'Station Name'])
-                                for _, row in valid_rows.iterrows():
-                                    code_val = str(row['Site Number']).strip()
-                                    name_val = str(row['Station Name']).strip()
-                                    if code_val and code_val != 'nan':
-                                        station_dict[code_val] = name_val
-            except Exception as e:
-                # 🔴 디버깅: 1단계 에러 발생 시 원인을 출력합니다.
-                st.error(f"⚠️ 1단계 (관측소 마스터) {f} 파일 읽기 실패: {e}")
-
-    # ---------------------------------------------------------
-    # 2. GENERAL식 및 전대수다항식 데이터 로드
-    # ---------------------------------------------------------
-    df_g, df_p = None, None
-    used_file_name = None
-
-    for d in search_dirs:
-        if not os.path.exists(d): continue
-        for f in os.listdir(d):
-            f_lower = f.lower()
-            if f.startswith('~$'): continue
-            full_path = os.path.join(d, f)
-            
-            if f_lower.endswith('.xlsx') or f_lower.endswith('.xls'):
-                try:
-                    xls_raw = pd.read_excel(full_path, sheet_name=None, header=None, engine='calamine')
-                    for s_name, sheet_df in xls_raw.items():
-                        if sheet_df.empty: continue
-                        
-                        header_idx = 0
-                        for i in range(min(20, len(sheet_df))):
-                            row_vals = [str(x).replace(' ', '').replace('\n', '').lower() for x in sheet_df.iloc[i].values if pd.notna(x)]
-                            row_str = "".join(row_vals)
-                            if '관측소코드' in row_str or '지점코드' in row_str or '재현기간' in row_str or ('a' in row_vals and 'b' in row_vals):
-                                header_idx = i
-                                break
-                                
-                        df_fixed = sheet_df.iloc[header_idx+1:].copy()
-                        df_fixed.columns = sheet_df.iloc[header_idx].values
-                        df_std = standardize_df(df_fixed)
-                        
-                        cols = [str(c).strip().lower() for c in df_std.columns]
-                        
-                        if 'a' in cols and 'b' in cols and 'n' in cols:
-                            df_g_tmp = df_std.copy()
-                            df_g_tmp.columns = [str(c).strip().lower() if str(c).strip().lower() in ['a', 'b', 'n'] else c for c in df_g_tmp.columns]
-                            df_g = df_g_tmp
-                            
-                        if 'a' in cols and 'b' in cols and 'g' in cols:
-                            df_p_tmp = df_std.copy()
-                            df_p_tmp.columns = [str(c).strip().lower() if str(c).strip().lower() in ['a', 'b', 'c', 'd', 'e', 'f', 'g'] else c for c in df_p_tmp.columns]
-                            df_p = df_p_tmp
-                            
-                    if df_g is not None and df_p is not None:
-                        used_file_name = f
-                        break
-                except Exception as e:
-                    # 🔴 디버깅: 2단계 에러 발생 시 원인을 출력합니다.
-                    st.error(f"⚠️ 2단계 (강우 데이터) {f} 파일 읽기 실패: {e}")
-                    
-        if used_file_name: break
-
-    # ---------------------------------------------------------
-    # 3. 마스터 관측소명과 강우강도 식 병합 (완벽 대응)
-    # ---------------------------------------------------------
-    if df_g is not None and df_p is not None:
-        for df in [df_g, df_p]:
-            if 'Station Name' not in df.columns:
-                df['Station Name'] = np.nan
-            
-            # station_dict에 있는 이름(예: 평창군(월정분교))으로 완벽하게 강제 덮어쓰기
-            mapped_names = df['Site Number'].map(station_dict)
-            df['Station Name'] = mapped_names.combine_first(df['Station Name']).fillna('이름없음')
-            
-            # 출력 라벨: 관측소명(코드) 형식 (예: 평창군(월정분교)(10014010))
-            df['Select_Label'] = df['Station Name'] + "(" + df['Site Number'].astype(str) + ")"
-        
-        return df_g, df_p, used_file_name
-    else:
-        return None, None, None
 
 # ==========================================
 # 2. 설계 계산 클래스
@@ -253,19 +93,14 @@ def main():
     
     # 데이터 로드
     distances, n_values, q_matrix, interp_func = load_dredging_data('dredging_capacity.csv')
-    df_gen, df_poly, used_file_name = load_rainfall_data()
     design = SpillwayDesign()
 
     if interp_func is None: st.stop()
 
-    # --- 사이드바: 상태 표시 ---
+    # --- 사이드바: 상태 표시 (엑셀 연동 경고 삭제 및 수동 모드 안내) ---
     with st.sidebar:
-        st.header("📁 데이터 연동 상태")
-        if used_file_name:
-            st.success(f"✅ 폴더 내 엑셀 인식 완료\n\n파일명: `{used_file_name}`")
-            st.info("💡 관측소명(코드)이 정상적으로 맵핑되어 표시됩니다.")
-        else:
-            st.warning("⚠️ 엑셀 파일을 찾을 수 없습니다. 파이썬 스크립트와 같은 폴더에 엑셀 파일을 넣어주세요.")
+        st.header("📁 강우 데이터 설정")
+        st.success("💡 **수동 입력 모드 활성화됨**\n\n엑셀 자동 연동 대신 WAMIS 사이트를 통한 직관적인 수동 계수 입력 방식으로 전환되었습니다.")
 
     st.title("🌊 여수토 단면 및 본체 설계")
 
@@ -415,10 +250,6 @@ def main():
         }
     }
 
-    # 기본 임시 데이터
-    default_poly_coeffs = [4.019092, -0.316114, -0.026913, -0.042763, 0.006350, 0.001258, -0.000223]
-    default_gen_coeffs = [1047.202, 7.60767, 0.67501]
-
     st.markdown("##### 1) 강우강도 산정")
     c2_3, c2_4, c2_5 = st.columns(3)
     with c2_3:
@@ -430,46 +261,49 @@ def main():
         selected_ksce_period = st.selectbox("빈도 선택 (대한토목학회)", ["5년", "10년", "20년"], index=1)
         ksce_data = ksce_region_data[selected_region][selected_ksce_period]
             
+    # --- ✨ 수동 입력 방식으로 변경된 부분 ---
     with c2_5:
-        st.write("② 전대수다항식 / ③ GENERAL식 (자동 인식됨)")
+        st.write("② 전대수다항식 / ③ GENERAL식")
+        st.markdown("**[🔗 전국 하천유역 홍수량 및 확률강우량 정보 (WAMIS)](https://map.wamis.go.kr/)**", help="클릭 시 새 창에서 열립니다. 해당 사이트에서 지역별 계수를 확인하여 아래에 직접 입력해 주세요.")
         
-        # --- 엑셀 데이터 연동 및 자동 추출 로직 ---
-        if df_poly is not None and df_gen is not None and not df_poly.empty:
-            station_list = sorted(list(df_poly['Select_Label'].dropna().unique()))
-            
-            # (편의기능) "군산"이나 "평창"이 목록에 있으면 기본 선택되도록
-            default_index = next((i for i, label in enumerate(station_list) if "군산" in label or "평창" in label), 0)
-            
-            selected_station_label = st.selectbox("관측소명(관측소 코드) 선택", station_list, index=default_index)
-            
-            periods_poly = df_poly[df_poly['Select_Label'] == selected_station_label]['Return Period'].unique()
-            periods_gen = df_gen[df_gen['Select_Label'] == selected_station_label]['Return Period'].unique()
-            
-            available_periods = sorted(list(set(periods_poly) & set(periods_gen)))
-            if not available_periods: available_periods = sorted(list(periods_poly))
+        with st.container(border=True):
+            st.markdown("###### 📍 지역 및 빈도 설정")
+            c_loc1, c_loc2 = st.columns(2)
+            with c_loc1:
+                manual_station_name = st.text_input("지역이름", value="군산")
+            with c_loc2:
+                # 💡 이미지에 표시된 관측소 코드번호로 업데이트
+                manual_station_code = st.text_input("코드번호", value="32031140")
                 
-            default_period_index = next((i for i, p in enumerate(available_periods) if p == 10), 0)
+            selected_period_str = st.selectbox("재현빈도 선택", ["5년", "10년", "20년"], index=1)
+            selected_period = selected_period_str.replace("년", "")
             
-            selected_period = st.selectbox("재현빈도 선택", available_periods, index=default_period_index)
+            selected_station_label = f"{manual_station_name}({manual_station_code})"
+
+        with st.expander("📝 전대수다항식 계수 입력", expanded=False):
+            st.caption("a, b, c, d, e, f, g 계수를 입력해 주세요.")
+            c_pa, c_pb, c_pc = st.columns(3)
+            # 💡 첨부 이미지에 표시된 a~g 계수값으로 기본값 업데이트
+            p_a = c_pa.number_input("a", value=4.103589, format="%.6f", key="pa")
+            p_b = c_pb.number_input("b", value=-0.345960, format="%.6f", key="pb")
+            p_c = c_pc.number_input("c", value=-0.282630, format="%.6f", key="pc")
             
-            poly_row = df_poly[(df_poly['Select_Label'] == selected_station_label) & (df_poly['Return Period'] == selected_period)]
-            if not poly_row.empty:
-                selected_poly_coeffs = poly_row[['a', 'b', 'c', 'd', 'e', 'f', 'g']].values[0].tolist()
-            else:
-                st.warning("선택한 조건의 전대수다항식 계수가 없습니다. 기본값을 적용합니다.")
-                selected_poly_coeffs = default_poly_coeffs
-                
-            gen_row = df_gen[(df_gen['Select_Label'] == selected_station_label) & (df_gen['Return Period'] == selected_period)]
-            if not gen_row.empty:
-                selected_gen_coeffs = gen_row[['a', 'b', 'n']].values[0].tolist()
-            else:
-                st.warning("선택한 조건의 GENERAL식 계수가 없습니다. 기본값을 적용합니다.")
-                selected_gen_coeffs = default_gen_coeffs
-        else:
-            selected_poly_coeffs = default_poly_coeffs
-            selected_gen_coeffs = default_gen_coeffs
-            selected_station_label = "기본값 (엑셀 미적용)"
-            selected_period = "10"
+            c_pd, c_pe, c_pf, c_pg = st.columns(4)
+            p_d = c_pd.number_input("d", value=0.276805, format="%.6f", key="pd")
+            p_e = c_pe.number_input("e", value=-0.146250, format="%.6f", key="pe")
+            p_f = c_pf.number_input("f", value=0.033644, format="%.6f", key="pf")
+            p_g = c_pg.number_input("g", value=-0.002780, format="%.6f", key="pg")
+            
+            selected_poly_coeffs = [p_a, p_b, p_c, p_d, p_e, p_f, p_g]
+
+        with st.expander("📝 GENERAL식 계수 입력", expanded=False):
+            st.caption("해당 빈도의 a, b, n 계수를 입력해 주세요.")
+            c_ga, c_gb, c_gn = st.columns(3)
+            g_a = c_ga.number_input("a", value=1047.202, format="%.3f", key="ga")
+            g_b = c_gb.number_input("b", value=7.60767, format="%.5f", key="gb")
+            g_n = c_gn.number_input("n", value=0.67501, format="%.5f", key="gn")
+            
+            selected_gen_coeffs = [g_a, g_b, g_n]
 
     # 계산 수행
     rain_i_tomok, rain_i_poly, rain_i_gen, dredge_q, water_ratio = design.calculate_discharge(
@@ -498,7 +332,7 @@ def main():
         st.latex(r"\ln(I) = a + b(\ln t) + c(\ln t)^2 + d(\ln t)^3 + e(\ln t)^4 + f(\ln t)^5 + g(\ln t)^6")
         
         a1, b1, c1, d1, e1, f1, g1 = selected_poly_coeffs
-        st.write(f"📌 **추출된 계수:** `a={a1:.6f}`, `b={b1:.6f}`, `c={c1:.6f}`, `d={d1:.6f}`, `e={e1:.6f}`, `f={f1:.6f}`, `g={g1:.6f}`")
+        st.write(f"📌 **입력된 계수:** `a={a1:.6f}`, `b={b1:.6f}`, `c={c1:.6f}`, `d={d1:.6f}`, `e={e1:.6f}`, `f={f1:.6f}`, `g={g1:.6f}`")
         
         st.write(f"👉 산정된 강우강도: **{rain_i_poly:.2f} mm/hr**")
 
@@ -506,7 +340,7 @@ def main():
         st.write(f"**③ GENERAL식** [{selected_station_label} - {selected_period}년 빈도 적용]")
         st.latex(r"I = \frac{a}{t^n + b}")
         ga, gb, gn = selected_gen_coeffs
-        st.write(f"📌 **추출된 계수:** `a={ga:.6f}`, `b={gb:.6f}`, `n={gn:.6f}`")
+        st.write(f"📌 **입력된 계수:** `a={ga:.6f}`, `b={gb:.6f}`, `n={gn:.6f}`")
         st.write(f"👉 산정된 강우강도: **{rain_i_gen:.2f} mm/hr**")
 
     st.markdown("##### 2) 강우강도에 대한 투기장 유역 계획유출량 산정")
