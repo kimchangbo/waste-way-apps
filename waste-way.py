@@ -92,7 +92,7 @@ def load_rainfall_data():
             try:
                 if f_lower.endswith('.xlsx') or f_lower.endswith('.xls'):
                     # 환경부 엑셀처럼 위에 빈칸이나 큰 제목이 있는 경우를 대비해 header=None으로 읽음
-                    xls_raw = pd.read_excel(full_path, sheet_name=None, header=None)
+                    xls_raw = pd.read_excel(full_path, sheet_name=None, header=None, engine='calamine')
                     for s_name, sheet_df in xls_raw.items():
                         if sheet_df.empty: continue
                         
@@ -136,7 +136,7 @@ def load_rainfall_data():
             
             if f_lower.endswith('.xlsx') or f_lower.endswith('.xls'):
                 try:
-                    xls_raw = pd.read_excel(full_path, sheet_name=None, header=None)
+                    xls_raw = pd.read_excel(full_path, sheet_name=None, header=None, engine='calamine')
                     for s_name, sheet_df in xls_raw.items():
                         if sheet_df.empty: continue
                         
