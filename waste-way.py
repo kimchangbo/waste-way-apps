@@ -117,7 +117,9 @@ def load_rainfall_data():
                                     name_val = str(row['Station Name']).strip()
                                     if code_val and code_val != 'nan':
                                         station_dict[code_val] = name_val
-            except: pass
+            except Exception as e:
+                # 🔴 디버깅: 1단계 에러 발생 시 원인을 출력합니다.
+                st.error(f"⚠️ 1단계 (관측소 마스터) {f} 파일 읽기 실패: {e}")
 
     # ---------------------------------------------------------
     # 2. GENERAL식 및 전대수다항식 데이터 로드
@@ -165,7 +167,10 @@ def load_rainfall_data():
                     if df_g is not None and df_p is not None:
                         used_file_name = f
                         break
-                except: pass
+                except Exception as e:
+                    # 🔴 디버깅: 2단계 에러 발생 시 원인을 출력합니다.
+                    st.error(f"⚠️ 2단계 (강우 데이터) {f} 파일 읽기 실패: {e}")
+                    
         if used_file_name: break
 
     # ---------------------------------------------------------
