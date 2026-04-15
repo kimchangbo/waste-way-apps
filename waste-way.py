@@ -5,19 +5,36 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from scipy.interpolate import RegularGridInterpolator
 import os
-import platform
+import urllib.request
+import matplotlib.font_manager as fm
 
-# --- 한글 깨짐 방지 및 폰트 설정 ---
+# --- 한글 깨짐 완벽 방지 (자동 다운로드 및 강제 적용) ---
 def set_korean_font():
-    system_name = platform.system()
-    if system_name == 'Windows':
-        plt.rc('font', family='Malgun Gothic')
-    elif system_name == 'Darwin': # Mac OS
-        plt.rc('font', family='AppleGothic')
-    elif system_name == 'Linux': # Streamlit Cloud 등 리눅스 환경
-        plt.rc('font', family='NanumGothic')
+    font_path = "NanumGothic.ttf"
+    # 구글 폰트 저장소에서 나눔고딕 직접 다운로드 URL
+    font_url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
     
-    plt.rcParams['axes.unicode_minus'] = False 
+    try:
+        # 1. 폰트 파일이 없으면 자동으로 다운로드
+        if not os.path.exists(font_path):
+            urllib.request.urlretrieve(font_url, font_path)
+        
+        # 2. matplotlib 폰트 매니저에 직접 추가 (캐시 무시)
+        fm.fontManager.addfont(font_path)
+        font_prop = fm.FontProperties(fname=font_path)
+        
+        # 3. 전역 폰트로 설정
+        plt.rc('font', family=font_prop.get_name())
+        plt.rcParams['axes.unicode_minus'] = False 
+        
+    except Exception as e:
+        # 통신 오류 등 예외 발생 시 기본 로직으로 폴백
+        st.warning("폰트 다운로드 실패로 기본 폰트를 적용합니다. 한글이 깨질 수 있습니다.")
+        if os.name == 'nt': 
+            plt.rc('font', family='Malgun Gothic')
+        else: 
+            plt.rc('font', family='AppleGothic')
+        plt.rcParams['axes.unicode_minus'] = False 
 
 # ==========================================
 # 1. 데이터 로드 및 보간 함수 (준설선 데이터만 유지)
