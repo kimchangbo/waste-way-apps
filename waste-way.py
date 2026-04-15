@@ -5,13 +5,18 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from scipy.interpolate import RegularGridInterpolator
 import os
+import platform
 
 # --- 한글 깨짐 방지 및 폰트 설정 ---
 def set_korean_font():
-    if os.name == 'nt': 
+    system_name = platform.system()
+    if system_name == 'Windows':
         plt.rc('font', family='Malgun Gothic')
-    else: 
+    elif system_name == 'Darwin': # Mac OS
         plt.rc('font', family='AppleGothic')
+    elif system_name == 'Linux': # Streamlit Cloud 등 리눅스 환경
+        plt.rc('font', family='NanumGothic')
+    
     plt.rcParams['axes.unicode_minus'] = False 
 
 # ==========================================
@@ -261,7 +266,6 @@ def main():
         selected_ksce_period = st.selectbox("빈도 선택 (대한토목학회)", ["5년", "10년", "20년"], index=1)
         ksce_data = ksce_region_data[selected_region][selected_ksce_period]
             
-    # --- ✨ 수동 입력 방식으로 변경된 부분 ---
     with c2_5:
         st.write("② 전대수다항식 / ③ GENERAL식")
         st.markdown("**[🔗 전국 하천유역 홍수량 및 확률강우량 정보 (WAMIS)](https://map.wamis.go.kr/)**", help="클릭 시 새 창에서 열립니다. 해당 사이트에서 지역별 계수를 확인하여 아래에 직접 입력해 주세요.")
@@ -272,7 +276,6 @@ def main():
             with c_loc1:
                 manual_station_name = st.text_input("지역이름", value="군산")
             with c_loc2:
-                # 💡 이미지에 표시된 관측소 코드번호로 업데이트
                 manual_station_code = st.text_input("코드번호", value="32031140")
                 
             selected_period_str = st.selectbox("재현빈도 선택", ["5년", "10년", "20년"], index=1)
@@ -283,7 +286,6 @@ def main():
         with st.expander("📝 전대수다항식 계수 입력", expanded=False):
             st.caption("a, b, c, d, e, f, g 계수를 입력해 주세요.")
             c_pa, c_pb, c_pc = st.columns(3)
-            # 💡 첨부 이미지에 표시된 a~g 계수값으로 기본값 업데이트
             p_a = c_pa.number_input("a", value=4.103589, format="%.6f", key="pa")
             p_b = c_pb.number_input("b", value=-0.345960, format="%.6f", key="pb")
             p_c = c_pc.number_input("c", value=-0.282630, format="%.6f", key="pc")
