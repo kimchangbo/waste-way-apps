@@ -7,7 +7,11 @@ from scipy.interpolate import RegularGridInterpolator
 import os
 import urllib.request
 import matplotlib.font_manager as fm
-
+with st.sidebar:
+    st.markdown("---")
+    st.write("**제작자:** [김창보]")
+    st.write("**소속:** [다온기술]")
+    st.caption("© 2026 All rights reserved.")
 # --- 한글 깨짐 완벽 방지 (자동 다운로드 및 강제 적용) ---
 def set_korean_font():
     font_path = "NanumGothic.ttf"
